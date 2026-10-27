@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passive Income Radar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: radar on the left, a ledger of category amounts on the right, stacked on narrow embeds */
+:root {
+  --bg: #ffffff; --panel: #f7f7f5; --ink: #1f2320; --muted: #6b726c;
+  --line: #e3e5e2; --grid: #d2d6d2; --accent: #2f8f45; --accent-fill: rgba(47,143,69,.16);
+  --error: #b3261e;
+  --font-display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #191919; --panel: #202020; --ink: #e8ebe8; --muted: #8f978f;
+    --line: #2f2f2f; --grid: #3a3a3a; --accent: #5cb86f; --accent-fill: rgba(92,184,111,.2);
+    --error: #ff9a9a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #191919; --panel: #202020; --ink: #e8ebe8; --muted: #8f978f;
+  --line: #2f2f2f; --grid: #3a3a3a; --accent: #5cb86f; --accent-fill: rgba(92,184,111,.2);
+  --error: #ff9a9a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; }
+.wrap { padding: 18px 16px 22px; display: grid; gap: 16px; max-width: 980px; margin: 0 auto; }
+.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.eyebrow { font-family: var(--font-display); font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 3px 0 0; }
+.total { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.total b { display: block; font-size: 22px; font-weight: 500; color: var(--accent); font-variant-numeric: tabular-nums; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+svg { width: 100%; max-width: 520px; height: auto; display: block; margin: 0 auto; }
+svg text { font-family: var(--font-body); }
+.ledger { display: grid; gap: 0; align-content: start; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row .name { font-weight: 500; }
+.row .amt { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.row .bar { grid-column: 1 / -1; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.row .bar span { display: block; height: 100%; background: var(--accent); }
+.row .share { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.controls { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button, .refresh { font-family: var(--font-body); font-size: 12px; background: transparent; color: var(--muted); border: 0; padding: 6px 10px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent-fill); color: var(--ink); }
+.refresh { border: 1px solid var(--line); border-radius: 7px; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status.error { color: var(--error); }
+@media (prefers-reduced-motion: no-preference) { #shape, .pt { transition: all .35s ease; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">Passive Income Summary</div>
+      <h1>Income Mix</h1>
+    </div>
+    <div class="total">Total (THB)<b id="total">–</b></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel"><svg id="radar" viewBox="0 0 560 470" role="img" aria-label="Radar chart of passive income by type"></svg></div>
+    <div class="panel ledger" id="ledger"></div>
+  </div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Chart scale">
+      <button type="button" id="s-log" aria-pressed="true">Log scale</button>
+      <button type="button" id="s-lin" aria-pressed="false">Linear scale</button>
+    </div>
+    <span class="status" id="status">Loading from Notion…</span>
+    <button type="button" class="refresh" id="refresh">Refresh</button>
+  </div>
+</div>
+
+<script>
+const REFRESH_MS = 30000;
+const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const state = { data: null, scale: "log" };
+
+// Optional ?theme=dark or ?theme=light in the embed URL forces a theme.
+const qTheme = new URLSearchParams(location.search).get("theme");
+if (qTheme === "dark" || qTheme === "light") document.documentElement.setAttribute("data-theme", qTheme);
+
+const NS = "http://www.w3.org/2000/svg";
+const CX = 280, CY = 238, R = 165;
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+
+function scaled(values) {
+  const max = Math.max(...values, 0);
+  if (max <= 0) return values.map(() => 0);
+  if (state.scale === "lin") return values.map(v => Math.max(0, v) / max);
+  const lmax = Math.log10(max + 1);
+  return values.map(v => Math.log10(Math.max(0, v) + 1) / lmax);
+}
+
+function draw() {
+  const svg = $("radar");
+  svg.innerHTML = "";
+  const cats = state.data?.categories || [];
+  const n = cats.length;
+  if (n < 3) {
+    const t = el("text", { x: CX, y: CY, "text-anchor": "middle", fill: "var(--muted)", "font-size": 14 }, svg);
+    t.textContent = n ? "A radar chart needs at least 3 categories." : "No data yet.";
+    return;
+  }
+  const ang = i => -Math.PI / 2 + i * 2 * Math.PI / n;
+  const pt = (i, r) => [CX + Math.cos(ang(i)) * r, CY + Math.sin(ang(i)) * r];
+
+  [0.2, 0.4, 0.6, 0.8, 1].forEach(f =>
+    el("polygon", { points: cats.map((_, i) => pt(i, R * f).join(",")).join(" "), fill: "none", stroke: "var(--grid)", "stroke-width": 1 }, svg));
+  cats.forEach((c, i) => {
+    const [x, y] = pt(i, R);
+    el("line", { x1: CX, y1: CY, x2: x, y2: y, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const [lx, ly] = pt(i, R + 22);
+    const cos = Math.cos(ang(i)), sin = Math.sin(ang(i));
+    const anchor = Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end";
+    const baseY = sin < -0.5 ? ly - 18 : sin > 0.5 ? ly + 8 : ly - 4;
+    const t = el("text", { x: lx, y: baseY, "text-anchor": anchor, fill: "var(--ink)", "font-size": 14, "font-weight": 500 }, svg);
+    t.textContent = c.name;
+    const v = el("text", { x: lx, y: baseY + 17, "text-anchor": anchor, fill: "var(--muted)", "font-size": 12 }, svg);
+    v.style.fontFamily = "var(--font-mono)";
+    v.textContent = fmt(c.amount);
+  });
+
+  const s = scaled(cats.map(c => c.amount));
+  const pts = s.map((f, i) => pt(i, R * f));
+  el("polygon", { id: "shape", points: pts.map(p => p.join(",")).join(" "), fill: "var(--accent-fill)", stroke: "var(--accent)", "stroke-width": 2.5, "stroke-linejoin": "round" }, svg);
+  pts.forEach(p => el("circle", { class: "pt", cx: p[0], cy: p[1], r: 5, fill: "var(--panel)", stroke: "var(--accent)", "stroke-width": 3 }, svg));
+}
+
+function ledger() {
+  const { categories = [], total = 0 } = state.data || {};
+  $("total").textContent = fmt(total);
+  $("ledger").innerHTML = categories.map(c => {
+    const share = total > 0 ? (c.amount / total) * 100 : 0;
+    return `<div class="row"><span class="name"></span><span class="amt">${fmt(c.amount)}</span>
+      <div class="bar"><span style="width:${share.toFixed(2)}%"></span></div>
+      <span class="share">${share.toFixed(1)}% of total</span></div>`;
+  }).join("");
+  [...$("ledger").querySelectorAll(".name")].forEach((n, i) => n.textContent = categories[i].name);
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/summary", { cache: "no-store" });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Request failed");
+    state.data = j;
+    draw(); ledger();
+    $("status").className = "status";
+    $("status").textContent = "Updated " + new Date(j.updatedAt).toLocaleTimeString();
+  } catch (e) {
+    $("status").className = "status error";
+    $("status").textContent = "Could not read Notion: " + e.message;
+  }
+}
+
+function setScale(s) {
+  state.scale = s;
+  $("s-log").setAttribute("aria-pressed", s === "log");
+  $("s-lin").setAttribute("aria-pressed", s === "lin");
+  try { localStorage.setItem("pi-radar-scale", s); } catch (e) {}
+  draw();
+}
+try { const s = localStorage.getItem("pi-radar-scale"); if (s === "lin" || s === "log") state.scale = s; } catch (e) {}
+setScale(state.scale);
+
+$("s-log").addEventListener("click", () => setScale("log"));
+$("s-lin").addEventListener("click", () => setScale("lin"));
+$("refresh").addEventListener("click", load);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+load();
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+</script>
+</body>
+</html>
